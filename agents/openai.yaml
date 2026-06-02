@@ -1,0 +1,4 @@
+interface:
+  display_name: "DOCX/WPS Redline"
+  short_description: "Agent-ready toolkit for real DOCX tracked changes and WPS-visible comments"
+  default_prompt: "Use docx-wps-redline to create a reviewed DOCX with real tracked changes and comments; validate it and report unresolved actions."

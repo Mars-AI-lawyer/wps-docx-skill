@@ -1,53 +1,136 @@
-# OOXML DOCX Skill
+# DOCX/WPS Redline Toolkit
 
-An open-source skill for generating `.docx` documents through OOXML with enhanced WPS compatibility.
+Agent-ready toolkit for creating **real Word/WPS tracked changes and comments** in `.docx` files by deterministic OOXML patching.
 
-## Why This Project
+`docx-wps-redline` is designed for agents, automation workflows, and command-line use. It extracts document structure, accepts a structured edit plan, writes true `<w:del>`, `<w:ins>`, and `word/comments.xml` records, and validates the resulting package. It does not simulate redlines with colored text, inline brackets, or body notes.
 
-Many existing DOCX generation libraries work well in Microsoft Word but encounter compatibility issues in WPS Office, especially when handling:
+The repository includes a Codex-compatible `SKILL.md`, but the core scripts and schema are platform neutral. Any agent platform can orchestrate the same workflow.
 
-* Tracked Changes (修订)
-* Comments (批注)
-* Complex Tables
-* Headers and Footers
-* Legal Document Formatting
+## Capabilities
 
-This project aims to provide a reusable skill layer that enables AI agents and automation workflows to generate high-quality DOCX files that can be opened and edited reliably in both Microsoft Word and WPS Office.
+- Create a new reviewed DOCX without overwriting the source file.
+- Add real deletion revisions (`<w:del>`) and insertion revisions (`<w:ins>`).
+- Add real Word/WPS comments in `word/comments.xml`.
+- Enable revision display settings for Word/WPS review views.
+- Preserve existing comments and tracked changes while avoiding ID collisions.
+- Validate output package structure, comments, revisions, authors, relationships, content types, and timestamp metadata.
+- Mark ambiguous, missing, repeated, or hash-mismatched targets as `unresolved` instead of guessing.
 
-## Features
+## Supported Actions
 
-* Generate OOXML-based `.docx` documents
-* Paragraphs, headings, lists, and tables
-* Images, headers, and footers
-* Comments support
-* Tracked revisions support
-* WPS compatibility optimization
-* AI Agent / Skill integration friendly
+- `comment_only`: add a real comment to a uniquely located paragraph or table-cell paragraph.
+- `replace_sentence`: replace a complete sentence or exact substring that appears once in the target paragraph.
+- `replace_clause`: replace a complete paragraph, table-cell paragraph, or contiguous paragraph range.
+- `insert_sentence_after`: insert text after a unique anchor sentence or exact target text.
+- `delete_sentence`: delete a complete sentence or exact substring that appears once in the target paragraph.
 
-## Use Cases
+## Install
 
-### Legal Document Automation
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements-dev.txt
+```
 
-* Contract review reports
-* Risk warning reports
-* Legal opinions
-* Due diligence reports
+Runtime use only needs `requirements.txt`. `requirements-dev.txt` adds test dependencies.
 
-### AI Agent Workflows
+## Agent Workflow
 
-* Automated report generation
-* Structured document output
-* Enterprise document automation
+1. Extract DOCX structure:
 
-## Roadmap
+```bash
+python3 scripts/extract_docx_structure.py "input.docx" --output "input_structure.json"
+```
 
-* [ ] Core OOXML document writer
-* [ ] Comment insertion
-* [ ] Tracked changes generation
-* [ ] WPS compatibility test suite
-* [ ] Agent Skill integration examples
-* [ ] Legal document templates
+2. Build `edit_plan.json` from the extracted structure. Use exact `target_text` and `normalized_text_hash`.
+
+3. Dry run when target confidence is uncertain:
+
+```bash
+python3 scripts/docx_redline_writer.py "input.docx" "edit_plan.json" \
+  --dry-run \
+  --log "redline_log.dry-run.json" \
+  --author "Reviewer"
+```
+
+4. Write the reviewed DOCX:
+
+```bash
+python3 scripts/docx_redline_writer.py "input.docx" "edit_plan.json" \
+  --output "input_redlined.docx" \
+  --log "input_redline_log.json" \
+  --timestamp-mode synthetic_spread \
+  --spread-minutes 120 \
+  --author "Reviewer"
+```
+
+5. Validate the output:
+
+```bash
+python3 scripts/validate_docx_redline.py "input_redlined.docx" \
+  --log "input_redline_log.json" \
+  --report "input_validation_report.json" \
+  --author "Reviewer"
+```
+
+6. Open the result in WPS or Word and follow `docs/WPS_MANUAL_TEST_CHECKLIST.md`.
+
+For a platform-neutral agent contract, see `docs/AGENT_INTEGRATION.md`.
+
+## Edit Plan Example
+
+```json
+{
+  "document_id": "sample-document",
+  "generated_at": "2026-06-02T12:00:00+08:00",
+  "actions": [
+    {
+      "action_id": "A001",
+      "action_type": "replace_sentence",
+      "target": {
+        "container_type": "paragraph",
+        "paragraph_index": 1,
+        "table_path": null,
+        "target_text": "The draft must be delivered by Friday.",
+        "context_before": "",
+        "context_after": "",
+        "normalized_text_hash": "..."
+      },
+      "replacement_text": "The draft must be delivered by Monday.",
+      "comment": "Deadline changed after review."
+    }
+  ]
+}
+```
+
+Full field rules are in `schemas/edit-plan.schema.json`.
+
+## Repository Contents
+
+- `SKILL.md`: Codex adapter instructions for this toolkit.
+- `agents/`: example agent prompts/configuration.
+- `scripts/extract_docx_structure.py`: extracts paragraphs, table cells, run text, and hashes.
+- `scripts/docx_redline_writer.py`: applies edit-plan actions as true OOXML revisions/comments.
+- `scripts/validate_docx_redline.py`: validates generated DOCX redline packages.
+- `schemas/edit-plan.schema.json`: edit plan schema.
+- `references/redline-workflow.md`: workflow and failure-mode notes.
+- `docs/WPS_MANUAL_TEST_CHECKLIST.md`: manual WPS acceptance checklist.
+- `tests/fixtures/public_sample.docx`: public synthetic test sample.
+
+## Tests
+
+```bash
+python3 -B -m unittest discover -s tests -v
+```
+
+Tests cover ordinary paragraphs, table cells, contiguous paragraph ranges, real revisions/comments, author override, preservation of existing comments/revisions, missing targets, repeated targets, hash mismatch, cross-parent paragraph ranges, and overwrite prevention.
+
+## Limitations
+
+The first version focuses on stable deterministic OOXML writing. It does not support nested table targeting, semantic cross-paragraph inference, accepting or rejecting existing revisions, complex numbering repair, or word-level intelligent diffing.
+
+Automatic validation means the generated package has the expected OOXML structure. It is not a blanket guarantee that every WPS version and every complex document layout is accepted. Always perform the manual WPS check before claiming WPS compatibility for a delivered document.
 
 ## License
 
-MIT License
+MIT. See `LICENSE`.

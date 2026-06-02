@@ -1,0 +1,40 @@
+{
+  "document_id": "public-sample",
+  "generated_at": "2026-06-02T12:00:00+08:00",
+  "actions": [
+    {
+      "action_id": "A001",
+      "action_type": "replace_sentence",
+      "target": {
+        "container_type": "paragraph",
+        "paragraph_index": 1,
+        "table_path": null,
+        "target_text": "The draft must be delivered by Friday.",
+        "context_before": "",
+        "context_after": "",
+        "normalized_text_hash": "74dac1536ccb8d16e451b86177f705c4f49f318d226cad4db40ef93fa31c6854"
+      },
+      "replacement_text": "The draft must be delivered by Monday.",
+      "comment": "Deadline changed after review."
+    },
+    {
+      "action_id": "A002",
+      "action_type": "comment_only",
+      "target": {
+        "container_type": "table_cell",
+        "paragraph_index": null,
+        "table_path": {
+          "table_index": 0,
+          "row_index": 0,
+          "cell_index": 0,
+          "paragraph_index_in_cell": 0
+        },
+        "target_text": "Table item requires review.",
+        "context_before": "",
+        "context_after": "",
+        "normalized_text_hash": "95749147ff2658756dabf97905bf975c017494e7043cad9c3371b0315b1798f7"
+      },
+      "comment": "Table comment only."
+    }
+  ]
+}
