@@ -6,6 +6,8 @@ Agent-ready toolkit for creating **real Word/WPS tracked changes and comments** 
 
 The repository includes a Codex-compatible `SKILL.md`, but the core scripts and schema are platform neutral. Any agent platform can orchestrate the same workflow.
 
+Author note: if a user requests a specific review/revision/comment author, pass that exact name through `--author` when writing and validating. This controls the OOXML author fields shown by Word/WPS, not just the JSON log.
+
 ## Capabilities
 
 - Create a new reviewed DOCX without overwriting the source file.
@@ -50,7 +52,7 @@ python3 scripts/extract_docx_structure.py "input.docx" --output "input_structure
 python3 scripts/docx_redline_writer.py "input.docx" "edit_plan.json" \
   --dry-run \
   --log "redline_log.dry-run.json" \
-  --author "Reviewer"
+  --author "<review-author>"
 ```
 
 4. Write the reviewed DOCX:
@@ -61,7 +63,7 @@ python3 scripts/docx_redline_writer.py "input.docx" "edit_plan.json" \
   --log "input_redline_log.json" \
   --timestamp-mode synthetic_spread \
   --spread-minutes 120 \
-  --author "Reviewer"
+  --author "<review-author>"
 ```
 
 5. Validate the output:
@@ -70,7 +72,7 @@ python3 scripts/docx_redline_writer.py "input.docx" "edit_plan.json" \
 python3 scripts/validate_docx_redline.py "input_redlined.docx" \
   --log "input_redline_log.json" \
   --report "input_validation_report.json" \
-  --author "Reviewer"
+  --author "<review-author>"
 ```
 
 6. Open the result in WPS or Word and follow `docs/WPS_MANUAL_TEST_CHECKLIST.md`.

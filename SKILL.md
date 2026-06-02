@@ -11,6 +11,10 @@ Use this Codex adapter to orchestrate the platform-neutral DOCX/WPS redline tool
 
 Do not directly edit DOCX XML by hand for redlines. Generate an `edit_plan.json`, let the writer locate exact targets, and treat unresolved actions as manual-review items.
 
+## Author Handling
+
+Default the review author to `Reviewer`. If the user asks to use a specific reviewer, redline author, revision author, comment author, or phrasing such as "use XX as the reviser", pass that exact name to every writer, dry-run, and validation command with `--author "XX"`. Do not only mention the requested author in notes or logs. The same `--author` value must become the OOXML `w:author` for both tracked revisions and comments so Word/WPS displays the requested name in the review UI.
+
 ## Workflow
 
 1. Extract document structure:
@@ -27,7 +31,7 @@ python3 scripts/extract_docx_structure.py "input.docx" --output "input_structure
 python3 scripts/docx_redline_writer.py "input.docx" "edit_plan.json" \
   --dry-run \
   --log "redline_log.dry-run.json" \
-  --author "Reviewer"
+  --author "<review-author>"
 ```
 
 4. Write a new reviewed copy:
@@ -38,7 +42,7 @@ python3 scripts/docx_redline_writer.py "input.docx" "edit_plan.json" \
   --log "input_redline_log.json" \
   --timestamp-mode synthetic_spread \
   --spread-minutes 120 \
-  --author "Reviewer"
+  --author "<review-author>"
 ```
 
 5. Validate the output:
@@ -47,7 +51,7 @@ python3 scripts/docx_redline_writer.py "input.docx" "edit_plan.json" \
 python3 scripts/validate_docx_redline.py "input_redlined.docx" \
   --log "input_redline_log.json" \
   --report "input_validation_report.json" \
-  --author "Reviewer"
+  --author "<review-author>"
 ```
 
 6. Ask the user to open the result in WPS or Word and follow `docs/WPS_MANUAL_TEST_CHECKLIST.md` before claiming WPS acceptance.
