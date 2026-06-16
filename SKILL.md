@@ -1,6 +1,13 @@
 ---
 name: docx-wps-redline
-description: Codex adapter for an agent-ready DOCX redline toolkit that creates WPS-compatible review copies with real Word tracked changes and real comments by deterministic OOXML patching. Use when Codex needs to orchestrate DOCX redlines, insertions, deletions, replacements, or margin comments while preserving the original file, avoiding simulated colored text, validating package structure, and preparing output for WPS or Microsoft Word review workflows.
+description: Codex adapter for an agent-ready DOCX redline toolkit that creates
+  WPS-compatible review copies with real Word tracked changes and real comments
+  by deterministic OOXML patching. Use when Codex needs to orchestrate DOCX
+  redlines, insertions, deletions, replacements, or margin comments while
+  preserving the original file, avoiding simulated colored text, validating
+  package structure, and preparing output for WPS or Microsoft Word review
+  workflows.
+disable: false
 ---
 
 # DOCX/WPS Redline Codex Adapter
@@ -59,12 +66,15 @@ python3 scripts/validate_docx_redline.py "input_redlined.docx" \
 ## Supported Actions
 
 - `comment_only`: add a real Word/WPS comment to a uniquely located paragraph or table-cell paragraph.
-- `replace_sentence`: replace a complete sentence or exact substring that appears once in the target paragraph.
+- `replace_sentence`: replace a complete sentence or exact substring that appears once in the target paragraph. Shows the entire target as deleted and the entire replacement as inserted.
+- `replace_words`: **fine-grained minimal replacement** — uses character-level diff to mark only the changed characters with tracked changes, preserving unchanged text as normal runs. Use this when only a few words or characters need to change. Falls back to `replace_sentence` automatically if the target text cannot be located precisely within paragraph runs.
 - `replace_clause`: replace a complete paragraph, table-cell paragraph, or contiguous paragraph range.
 - `insert_sentence_after`: insert one complete sentence after a unique anchor sentence or text.
 - `delete_sentence`: delete a complete sentence or exact substring that appears once in the target paragraph.
 
-The writer does not support semantic cross-paragraph inference, nested table targeting, accepting or rejecting existing revisions, micro-diff edits, or complex numbering repair.
+**Choosing between `replace_sentence` and `replace_words`**: Use `replace_words` when the modification is small (a few characters or words changed). Use `replace_sentence` when the entire sentence is rewritten.
+
+The writer does not support semantic cross-paragraph inference, nested table targeting, accepting or rejecting existing revisions, or complex numbering repair.
 
 ## Edit Plan Rules
 
@@ -74,7 +84,7 @@ Read `schemas/edit-plan.schema.json` before generating an edit plan. Each action
 - `action_type`
 - `target`
 - `comment`
-- `replacement_text` for `replace_sentence`, `replace_clause`, and `insert_sentence_after`
+- `replacement_text` for `replace_sentence`, `replace_words`, `replace_clause`, and `insert_sentence_after`
 
 Use exact `target_text` copied from extracted structure. If the target is missing, repeated, mismatched, or has a different `normalized_text_hash`, the writer must log the action as `unresolved` and not guess.
 
@@ -93,7 +103,7 @@ For `paragraph_range`, use `container_type: "paragraph_range"`, set `paragraph_i
 ## Resources
 
 - `scripts/extract_docx_structure.py`: extract paragraphs, table cells, run text, and hashes.
-- `scripts/docx_redline_writer.py`: apply confirmed edit-plan actions as true OOXML revisions/comments.
+- `scripts/docx_redline_writer.py`: apply confirmed edit-plan actions as true OOXML revisions/comments. Supports both sentence-level (`replace_sentence`) and character-level (`replace_words`) tracked changes.
 - `scripts/validate_docx_redline.py`: validate package parts, revisions, comments, authors, and timestamp audit fields.
 - `schemas/edit-plan.schema.json`: edit plan schema.
 - `references/redline-workflow.md`: detailed workflow and failure-mode notes.

@@ -408,6 +408,47 @@ def iso_beijing(value: datetime) -> str:
     return value.astimezone(BEIJING).replace(microsecond=0).isoformat()
 
 
+def find_target_run_span(
+    paragraph: etree._Element,
+    target_text: str,
+) -> tuple[int, int, int, int] | None:
+    """Locate *target_text* inside the paragraph's direct runs.
+
+    Returns ``(start_run_index, start_offset, end_run_index, end_offset)``
+    where *end_offset* is the exclusive character position within the end run.
+    Returns ``None`` when the text is not found or is not unique across the
+    document (the caller is expected to have verified paragraph-level
+    uniqueness before calling this function).
+    """
+    runs = paragraph_runs(paragraph)
+    if not runs:
+        return None
+
+    # Build a mapping from concatenated character index → (run_index, char_in_run)
+    char_map: list[tuple[int, int]] = []
+    for run_index, run in enumerate(runs):
+        text = direct_run_text(run)
+        for char_index_in_run, _ in enumerate(text):
+            char_map.append((run_index, char_index_in_run))
+
+    # Concatenated plain text of all direct runs
+    full_text = "".join(direct_run_text(run) for run in runs)
+
+    # Find target_text in the concatenated string (must appear exactly once)
+    pos = full_text.find(target_text)
+    if pos < 0:
+        return None
+    if full_text.find(target_text, pos + 1) >= 0:
+        return None  # not unique within paragraph runs
+
+    start_run_index, start_offset = char_map[pos]
+    end_pos = pos + len(target_text) - 1
+    end_run_index, end_char_in_run = char_map[end_pos]
+    end_offset = end_char_in_run + 1  # exclusive
+
+    return start_run_index, start_offset, end_run_index, end_offset
+
+
 def require_docx_paths(input_path: Path, output_path: Path | None) -> None:
     if output_path is None:
         return

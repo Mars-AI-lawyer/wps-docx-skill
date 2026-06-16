@@ -37,6 +37,7 @@
           "enum": [
             "comment_only",
             "replace_sentence",
+            "replace_words",
             "replace_clause",
             "insert_sentence_after",
             "delete_sentence"
@@ -59,6 +60,23 @@
             "properties": {
               "action_type": {
                 "const": "replace_sentence"
+              }
+            }
+          },
+          "then": {
+            "required": ["replacement_text"],
+            "properties": {
+              "replacement_text": {
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action_type": {
+                "const": "replace_words"
               }
             }
           },

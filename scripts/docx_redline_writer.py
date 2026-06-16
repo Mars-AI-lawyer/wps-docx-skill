@@ -6,6 +6,7 @@ import json
 import os
 import zipfile
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -15,10 +16,12 @@ from ooxml_utils import (
     AUTHOR as DEFAULT_AUTHOR,
     NS,
     append_plain_run,
+    direct_run_text,
     ensure_comments_content_type,
     ensure_comments_relationship,
     ensure_track_revisions,
     find_target_paragraph,
+    find_target_run_span,
     first_run_properties,
     format_ooxml_utc,
     generate_display_timestamps,
@@ -34,6 +37,7 @@ from ooxml_utils import (
     normalized_hash,
     parse_datetime,
     parse_xml,
+    paragraph_runs,
     paragraph_text,
     qn,
     remove_paragraph_content,
@@ -44,6 +48,7 @@ from ooxml_utils import (
 
 SUPPORTED_ACTIONS = {
     "replace_sentence",
+    "replace_words",
     "replace_clause",
     "comment_only",
     "delete_sentence",
@@ -73,6 +78,7 @@ def validate_edit_plan(plan: dict[str, Any]) -> list[str]:
     allowed = {
         "comment_only",
         "replace_sentence",
+        "replace_words",
         "replace_clause",
         "insert_sentence_after",
         "delete_sentence",
@@ -90,7 +96,7 @@ def validate_edit_plan(plan: dict[str, Any]) -> list[str]:
         action_type = action.get("action_type")
         if action_type not in allowed:
             errors.append(f"{prefix} unsupported action_type in schema: {action_type}")
-        if action_type in {"replace_sentence", "replace_clause", "insert_sentence_after"}:
+        if action_type in {"replace_sentence", "replace_words", "replace_clause", "insert_sentence_after"}:
             if not action.get("replacement_text"):
                 errors.append(f"{prefix} missing replacement_text")
         if not action.get("comment"):
@@ -266,6 +272,165 @@ def replace_paragraph_sentence(
     )
     append_comment_end_and_reference(paragraph, comment_id)
     append_plain_run(paragraph, suffix, run_properties=run_properties)
+
+
+def replace_paragraph_words(
+    paragraph: etree._Element,
+    *,
+    original_text: str,
+    replacement_text: str,
+    author: str,
+    base_revision_id: int,
+    max_revision_id: int,
+    comment_id: int,
+    base_date,
+) -> tuple[bool, str, int]:
+    """Fine-grained replacement: only changed characters get w:del / w:ins.
+
+    *max_revision_id* is the exclusive upper bound for revision IDs this call
+    may use.  Returns ``(applied, granularity, ids_used)`` where *applied* is
+    True when the fine-grained path succeeded, *granularity* is ``"word"`` or
+    ``"sentence"`` (fallback), and *ids_used* is the number of revision IDs
+    consumed.
+    """
+    # --- locate target_text inside the paragraph's runs ---
+    span = find_target_run_span(paragraph, original_text)
+    if span is None:
+        # Cannot locate precisely → fall back to whole-sentence replace
+        return False, "sentence", 0
+
+    start_run_index, start_offset, end_run_index, end_offset = span
+    runs = paragraph_runs(paragraph)
+
+    # Collect run properties from the first run for new runs we create
+    run_properties = first_run_properties(paragraph)
+
+    # --- detach prefix runs, target runs, suffix runs ---
+    prefix_runs = runs[:start_run_index]
+    target_runs = runs[start_run_index : end_run_index + 1]
+    suffix_runs = runs[end_run_index + 1 :]
+
+    # Extract the actual text from the target run span
+    # (may differ from original_text if runs split oddly, but should match)
+    target_piece_texts = []
+    for i, run in enumerate(target_runs):
+        text = direct_run_text(run)
+        if i == 0 and i == len(target_runs) - 1:
+            # target is within a single run
+            target_piece_texts.append(text[start_offset:end_offset])
+        elif i == 0:
+            target_piece_texts.append(text[start_offset:])
+        elif i == len(target_runs) - 1:
+            target_piece_texts.append(text[:end_offset])
+        else:
+            target_piece_texts.append(text)
+    actual_target = "".join(target_piece_texts)
+
+    # --- compute character-level diff ---
+    matcher = SequenceMatcher(None, actual_target, replacement_text, autojunk=False)
+    opcodes = matcher.get_opcodes()
+
+    # Count required revision IDs and check budget
+    required_ids = 0
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "delete":
+            required_ids += 1
+        elif tag == "insert":
+            required_ids += 1
+        elif tag == "replace":
+            if actual_target[i1:i2]:
+                required_ids += 1
+            if replacement_text[j1:j2]:
+                required_ids += 1
+    if required_ids > (max_revision_id - base_revision_id):
+        return False, "sentence", 0
+
+    # --- rebuild paragraph ---
+    # Remove all children except w:pPr
+    remove_paragraph_content(paragraph)
+
+    # Re-attach prefix runs (preserve originals)
+    for run in prefix_runs:
+        paragraph.append(run)
+
+    # Comment range start (covers entire target region)
+    append_comment_start(paragraph, comment_id)
+
+    # Apply diff opcodes
+    rev_id = base_revision_id
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            text = actual_target[i1:i2]
+            if text:
+                append_plain_run(paragraph, text, run_properties=run_properties)
+        elif tag == "delete":
+            text = actual_target[i1:i2]
+            if text:
+                paragraph.append(
+                    make_revision_element(
+                        "del",
+                        revision_id=rev_id,
+                        author=author,
+                        date=base_date,
+                        text=text,
+                        deleted=True,
+                        run_properties=run_properties,
+                    )
+                )
+                rev_id += 1
+        elif tag == "insert":
+            text = replacement_text[j1:j2]
+            if text:
+                paragraph.append(
+                    make_revision_element(
+                        "ins",
+                        revision_id=rev_id,
+                        author=author,
+                        date=base_date,
+                        text=text,
+                        deleted=False,
+                        run_properties=run_properties,
+                    )
+                )
+                rev_id += 1
+        elif tag == "replace":
+            del_text = actual_target[i1:i2]
+            ins_text = replacement_text[j1:j2]
+            if del_text:
+                paragraph.append(
+                    make_revision_element(
+                        "del",
+                        revision_id=rev_id,
+                        author=author,
+                        date=base_date,
+                        text=del_text,
+                        deleted=True,
+                        run_properties=run_properties,
+                    )
+                )
+                rev_id += 1
+            if ins_text:
+                paragraph.append(
+                    make_revision_element(
+                        "ins",
+                        revision_id=rev_id,
+                        author=author,
+                        date=base_date,
+                        text=ins_text,
+                        deleted=False,
+                        run_properties=run_properties,
+                    )
+                )
+                rev_id += 1
+
+    # Comment range end + reference (covers entire target region)
+    append_comment_end_and_reference(paragraph, comment_id)
+
+    # Re-attach suffix runs (preserve originals)
+    for run in suffix_runs:
+        paragraph.append(run)
+
+    return True, "word", required_ids
 
 
 def replace_single_paragraph_clause(
@@ -482,7 +647,7 @@ def insert_sentence_after_target(
 
 
 def event_count(action: dict[str, Any]) -> int:
-    if action.get("action_type") in {"replace_sentence", "replace_clause"}:
+    if action.get("action_type") in {"replace_sentence", "replace_words", "replace_clause"}:
         return 3
     if action.get("action_type") in {"delete_sentence", "insert_sentence_after"}:
         return 2
@@ -672,6 +837,65 @@ def run_redline(
                 action_log["status"] = "applied"
                 changed = True
             next_rev_id += 2
+            next_comm_id += 1
+
+        elif action_type == "replace_words":
+            delete_ts = next(timestamp_iter)
+            insert_ts = next(timestamp_iter)
+            comment_ts = next(timestamp_iter)
+            action_log["display_timestamps"].extend(
+                [
+                    timestamp_record("delete_revision", delete_ts),
+                    timestamp_record("insert_revision", insert_ts),
+                    timestamp_record("comment", comment_ts),
+                ]
+            )
+            action_log["revision_ids"] = [next_rev_id, next_rev_id + 1]
+            action_log["comment_id"] = next_comm_id
+            if dry_run:
+                action_log["status"] = "would_apply"
+            else:
+                # Budget: reserve at most 20 revision IDs for fine-grained diff
+                max_rev_budget = 20
+                applied, granularity, ids_used = replace_paragraph_words(
+                    paragraph,
+                    original_text=target["target_text"],
+                    replacement_text=action["replacement_text"],
+                    author=author,
+                    base_revision_id=next_rev_id,
+                    max_revision_id=next_rev_id + max_rev_budget,
+                    comment_id=next_comm_id,
+                    base_date=delete_ts,
+                )
+                action_log["granularity"] = granularity
+                if not applied:
+                    # Fallback: fine-grained failed, use sentence-level
+                    replace_paragraph_sentence(
+                        paragraph,
+                        original_text=target["target_text"],
+                        replacement_text=action["replacement_text"],
+                        author=author,
+                        delete_revision_id=next_rev_id,
+                        insert_revision_id=next_rev_id + 1,
+                        comment_id=next_comm_id,
+                        delete_date=delete_ts,
+                        insert_date=insert_ts,
+                    )
+                    ids_used = 2
+                action_log["revision_ids"] = list(
+                    range(next_rev_id, next_rev_id + ids_used)
+                )
+                comments_root.append(
+                    make_comment(
+                        next_comm_id,
+                        author,
+                        comment_ts,
+                        action_log["comment"],
+                    )
+                )
+                action_log["status"] = "applied"
+                changed = True
+                next_rev_id += ids_used
             next_comm_id += 1
 
         elif action_type == "replace_clause":
